@@ -83,7 +83,10 @@ if ($ValidIPAddressRange -and ($ValidPortList -or $ValidServiceList)) {
 
     $ScanResults = @()
     $Progress = 0
-    $TotalProgress = $
+    $TotalProgress = $()
+
+}
+
 ################ Problem her
 
 
