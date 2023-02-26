@@ -1,9 +1,3 @@
-
-
-
-
-
-
 [CmdletBinding()]
 param (
     [Parameter(Mandatory=$true)]
@@ -93,86 +87,10 @@ if ($ValidIPAddressRange -and ($ValidPortList -or $ValidServiceList)) {
 
 
 
-function Get-PortScannerResults {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-        [IPAddress[]]$IPRange,
-        
-        [Parameter(Mandatory = $false)]
-        [ValidateSet('FTP','SSH','SMTP','HTTP','HTTPS','DNS','POP3','IMAP','SNMP','LDAP','KERBEROS','SMTPS','HTTPS-ALT','MSSQL','MYSQL','ORACLE','RDP','VNC','TELNET','SSH-ALT','PING')]
-        [string[]]$PortNames = @('HTTP','HTTPS','RDP','SSH','FTP','SMTP','DNS','POP3','IMAP','SNMP','LDAP','TELNET'),
-        
-        [Parameter(Mandatory = $false)]
-        [int[]]$PortNumbers = @(80,443,3389,22,21,25,53,110,143,161,389,23),
-        
-        [Parameter(Mandatory = $false)]
-        [int[]]$TopPorts = @(80,443,3389,22,21,25,53,110,143,161,389,23,445,139,53,135,137,138,1433,3306,1521,1434,1723,3389,5900,8080,10000,20000,49152..65535),
-        
-        [Parameter(Mandatory = $false)]
-        [int]$ThreadCount = 10
-    )
-
-    # Array to store the results
-    $Results = @()
-
-    # If no ports are provided, use the default top ports
-    if (!$PortNames -and !$PortNumbers) {
-        $PortNumbers = $TopPorts
-    }
-
-    # Convert port names to numbers
-    if ($PortNames) {
-        $PortNumbers += $PortNames | ForEach-Object {
-            [int]($PortMappings[$_])
-        }
-    }
-
-    # Remove duplicates and sort
-    $PortNumbers = $PortNumbers | Sort-Object | Get-Unique
-
-    # Get IP range from CIDR notation
-    $IPRange = Get-IPRange -CIDR $IPRange
-
-    # Calculate total number of IPs to scan
-    $TotalIPs = $IPRange.Count * $PortNumbers.Count
-
-    # Initialize progress bar
-    $Progress = 0
-    $ProgressBar = New-Object -TypeName System.Windows.Forms.ProgressBar
-    $ProgressBar.Minimum = 0
-    $ProgressBar.Maximum = $TotalIPs
-    $ProgressBar.Step = 1
-    $ProgressBar.Show()
-
-    # Initialize thread pool
-    $JobPool = [System.Collections.ArrayList]::new()
-    $JobResults = [System.Collections.Concurrent.ConcurrentBag[PSObject]]::new()
-    $Semaphore = New-Object -TypeName System.Threading.SemaphoreSlim -ArgumentList 1, $ThreadCount
-
-    # Scan each IP and port in parallel
-    $PortNumbers | ForEach-Object {
-        $Port = $_
-        $IPRange | ForEach-Object {
-            $IP = $_
-            $Job = Start-Job -ScriptBlock {
-                # Wait for semaphore
-                $Semaphore.Wait()
-
-                try {
-                    # Scan IP and port
-                    $ScanResult = Scan-IPPort -IPAddress $IP -Port $Port
-
-                    # Perform MAC lookup
-                    $MacAddress = Get-MacAddress -IPAddress $IP
-
-                    # Create custom object with results
-                    [PSCustomObject]@{
-                        IPAddress = $ScanResult.IPAddress
-                        Port = $ScanResult.Port
 
 
-################ Muulig fejl her
+
+
 
 
 # Define the cmdlet
@@ -357,128 +275,10 @@ function Invoke-IPScanner {
 
 
 # Define the function that will be exported as a cmdlet
-function Get-IPPortScan {
-    [CmdletBinding()]
-    Param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [ValidateScript({Test-Connection -ComputerName $_ -Quiet -Count 1})]
-        [string[]]$IPAddress,
 
-        [Parameter(Mandatory = $true)]
-        [string]$PortList,
-
-        [Parameter()]
-        [int]$Threads = 10,
-
-        [Parameter()]
-        [string]$MACLookupAPI = "https://api.macvendors.com/"
-    )
-
-    # Convert the port list to an array of integers
-    $Ports = @()
-    foreach ($Port in ($PortList -split ",")) {
-        if ($Port -match "^\d+$") {
-            $Ports += [int]$Port
-        } else {
-            # Get the port number for the service name
-            $PortNumber = (Get-ServiceNameToPortNumber -ServiceName $Port)
-            if ($PortNumber) {
-                $Ports += $PortNumber
-            }
-        }
-    }
-
-    # If no ports are provided, use the top 50 most common
-    if ($Ports.Count -eq 0) {
-        $Ports = (Get-Top50Ports).Number
-    }
-
-    # Use a progress bar to show the progress of the IP address scanning
-    $Progress = [System.Collections.ArrayList]::new()
-    foreach ($IP in $IPAddress) {
-        $Progress.Add($null) | Out-Null
-    }
-    $ProgressIndex = 0
-
-    # Use a multi-threaded approach to scan the IP addresses and ports
-    $JobParams = @{
-        ScriptBlock = {
-            Param($IPAddress, $Ports, $MACLookupAPI)
-
-            # Get the MAC address for the IP address
-            $MACAddress = ""
-            try {
-                $MACAddress = (Invoke-WebRequest -Uri "$MACLookupAPI?ip=$IPAddress" -UseBasicParsing).Content.Trim()
-            } catch {}
-
-            # Scan the ports for the IP address
-            $Result = @{
-                IPAddress = $IPAddress
-                MACAddress = $MACAddress
-                Vendor = ""
-                Ports = @()
-            }
-            foreach ($Port in $Ports) {
-                $TCPClient = New-Object System.Net.Sockets.TcpClient
-                $AsyncConnect = $TCPClient.BeginConnect($IPAddress, $Port, $null, $null)
-                if (!$AsyncConnect.AsyncWaitHandle.WaitOne(500)) {
-                    # Timeout occurred
-                    $TCPClient.Close()
-                } else {
-                    # Connection established
-                    $Result.Ports += @{
-                        Port = $Port
-                        ServiceName = (Get-PortNumberToServiceName -PortNumber $Port)
-                        WebInterface = (Get-WebInterfaceStatus -TCPClient $TCPClient)
-                    }
-                    $TCPClient.Close()
-                }
-            }
-
-            # Get the vendor information for the MAC address
-            if ($MACAddress) {
-                try {
-                    $VendorInfo = (Invoke-WebRequest -Uri "https://api.macvendors.com/$MACAddress" -UseBasicParsing).Content.Trim()
-                    $Result.Vendor = $VendorInfo
-                } catch {}
-            }
-
-            return $Result
-        }
-        ArgumentList = @($null, $Ports, $MACLookupAPI)
-    }
-    $Jobs = @()
-    foreach ($IP in $IPAddress) {
-        $JobParams.ArgumentList[0] = $IP
-        $Jobs += Start-Job @JobParams
-    }
-
-    # Wait for all the jobs to finish and retrieve the results
-    $
 #### FEJL HER
 
 
-# Import MacAddressLookup module
-Import-Module MacAddressLookup
-
-# Function to lookup MAC address
-function Lookup-MacAddress {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$IPAddress
-    )
-
-    # Get MAC address from MacVendors.com's API
-    $macAddress = Get-MacAddress -IpAddress $IPAddress -Verbose
-
-    # Return MAC address if found
-    if ($macAddress) {
-        return $macAddress
-    }
-
-    # Return null if MAC address not found
-    return $null
-}
 
 # Function to scan ports for a single IP address
 function Scan-Ports {
@@ -540,21 +340,6 @@ function Scan-Ports {
 }
 
 # Function to test for web interface
-function Test-WebInterface {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Uri
-    )
-
-    # Test for response
-    try {
-        $response = Invoke-WebRequest -Uri $Uri -Method HEAD -TimeoutSec 5
-        return $true
-    }
-    catch {
-        return $false
-    }
-}
 
 # Function to scan IP addresses in parallel
 function Scan-IPAddresses {
